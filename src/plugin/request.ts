@@ -195,12 +195,55 @@ export function prepareAntigravityRequest(
             const functionDeclarations: any[] = [];
             const passthroughTools: any[] = [];
 
-            const normalizeSchema = (schema: any) => {
-              if (schema && typeof schema === "object") {
+            // Sanitize schema - remove features not supported by JSON Schema draft 2020-12
+            // Recursively strips anyOf/allOf/oneOf and converts to permissive types
+            const sanitizeSchema = (schema: any): any => {
+              if (!schema || typeof schema !== "object") {
                 return schema;
               }
-              toolDebugMissing += 1;
-              return { type: "object", properties: {} };
+
+              const sanitized: any = {};
+
+              for (const key of Object.keys(schema)) {
+                // Skip anyOf/allOf/oneOf - not well supported
+                if (key === "anyOf" || key === "allOf" || key === "oneOf") {
+                  continue;
+                }
+
+                const value = schema[key];
+
+                if (key === "items" && value && typeof value === "object") {
+                  // Handle array items - if it has anyOf, replace with permissive type
+                  if (value.anyOf || value.allOf || value.oneOf) {
+                    sanitized.items = {};
+                  } else {
+                    sanitized.items = sanitizeSchema(value);
+                  }
+                } else if (key === "properties" && value && typeof value === "object") {
+                  // Recursively sanitize properties
+                  sanitized.properties = {};
+                  for (const propKey of Object.keys(value)) {
+                    sanitized.properties[propKey] = sanitizeSchema(value[propKey]);
+                  }
+                } else if (key === "additionalProperties" && value && typeof value === "object") {
+                  sanitized.additionalProperties = sanitizeSchema(value);
+                } else {
+                  sanitized[key] = value;
+                }
+              }
+
+              return sanitized;
+            };
+
+            const normalizeSchema = (schema: any) => {
+              if (!schema || typeof schema !== "object") {
+                toolDebugMissing += 1;
+                // Minimal fallback for tools without schemas
+                return { type: "object" };
+              }
+
+              // Sanitize and pass through
+              return sanitizeSchema(schema);
             };
 
             requestPayload.tools.forEach((tool: any, idx: number) => {
@@ -218,12 +261,15 @@ export function prepareAntigravityRequest(
                   tool.custom?.parameters ||
                   tool.custom?.input_schema;
 
-                const name =
+                let name =
                   decl?.name ||
                   tool.name ||
                   tool.function?.name ||
                   tool.custom?.name ||
                   `tool-${functionDeclarations.length}`;
+
+                // Sanitize tool name: must be alphanumeric with underscores, no special chars
+                name = String(name).replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
 
                 const description =
                   decl?.description ||
@@ -234,7 +280,7 @@ export function prepareAntigravityRequest(
 
                 functionDeclarations.push({
                   name,
-                  description,
+                  description: String(description || ""),
                   parameters: normalizeSchema(schema),
                 });
 
@@ -302,18 +348,18 @@ export function prepareAntigravityRequest(
                 newTool.custom = {
                   name: newTool.function.name || nameCandidate,
                   description: newTool.function.description,
-                  input_schema: schema ?? { type: "object", properties: {} },
+                  input_schema: schema ?? { type: "object", properties: {}, additionalProperties: false },
                 };
               }
               if (!newTool.custom && !newTool.function) {
                 newTool.custom = {
                   name: nameCandidate,
                   description: newTool.description,
-                  input_schema: schema ?? { type: "object", properties: {} },
+                  input_schema: schema ?? { type: "object", properties: {}, additionalProperties: false },
                 };
               }
               if (newTool.custom && !newTool.custom.input_schema) {
-                newTool.custom.input_schema = { type: "object", properties: {} };
+                newTool.custom.input_schema = { type: "object", properties: {}, additionalProperties: false };
                 toolDebugMissing += 1;
               }
 
@@ -487,6 +533,58 @@ export async function transformAntigravityResponse(
     return response;
   }
 
+  // For successful streaming responses, use TransformStream to transform SSE events
+  // while maintaining real-time streaming (no buffering of entire response)
+  if (streaming && response.ok && isEventStreamResponse && response.body) {
+    const headers = new Headers(response.headers);
+
+    // Buffer for partial SSE events that span chunks
+    let buffer = "";
+    const decoder = new TextDecoder();
+    const encoder = new TextEncoder();
+
+    const transformStream = new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        // Decode chunk with stream: true to handle multi-byte characters
+        buffer += decoder.decode(chunk, { stream: true });
+
+        // Split on double newline (SSE event delimiter)
+        const events = buffer.split("\n\n");
+
+        // Keep last part in buffer (may be incomplete)
+        buffer = events.pop() || "";
+
+        // Process and forward complete events immediately
+        for (const event of events) {
+          if (event.trim()) {
+            const transformed = transformStreamingPayload(event);
+            controller.enqueue(encoder.encode(transformed + "\n\n"));
+          }
+        }
+      },
+      flush(controller) {
+        // Flush any remaining bytes from TextDecoder
+        buffer += decoder.decode();
+
+        // Handle any remaining data at stream end
+        if (buffer.trim()) {
+          const transformed = transformStreamingPayload(buffer);
+          controller.enqueue(encoder.encode(transformed));
+        }
+      }
+    });
+
+    logAntigravityDebugResponse(debugContext, response, {
+      note: "Streaming SSE response (transformed)",
+    });
+
+    return new Response(response.body.pipeThrough(transformStream), {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  }
+
   try {
     const text = await response.text();
     const headers = new Headers(response.headers);
@@ -558,13 +656,12 @@ export async function transformAntigravityResponse(
 
     logAntigravityDebugResponse(debugContext, response, {
       body: text,
-      note: streaming ? "Streaming SSE payload" : undefined,
+      note: streaming ? "Streaming SSE payload (buffered fallback)" : undefined,
       headersOverride: headers,
     });
 
-    if (streaming && response.ok && isEventStreamResponse) {
-      return new Response(transformStreamingPayload(text), init);
-    }
+    // Note: successful streaming responses are handled above via TransformStream.
+    // This path only handles non-streaming responses or failed streaming responses.
 
     if (!parsed) {
       return new Response(text, init);
