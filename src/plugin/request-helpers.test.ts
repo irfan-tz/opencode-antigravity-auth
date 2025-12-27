@@ -19,6 +19,7 @@ import {
   validateAndFixClaudeToolPairing,
   injectParameterSignatures,
   injectToolHardeningInstruction,
+  cleanJSONSchemaForAntigravity,
 } from "./request-helpers";
 
 describe("sanitizeThinkingPart (covered via filtering)", () => {
@@ -1132,10 +1133,6 @@ describe("validateAndFixClaudeToolPairing", () => {
   });
 });
 
-// =============================================================================
-// CONTEXT ERROR DETECTION TESTS
-// =============================================================================
-
 describe("injectParameterSignatures", () => {
   it("injects signatures into tool descriptions", () => {
     const tools = [
@@ -1182,7 +1179,6 @@ describe("injectParameterSignatures", () => {
     ];
 
     const result = injectParameterSignatures(tools);
-    // Should not double-inject
     const matches = result[0].functionDeclarations[0].description.match(/STRICT PARAMETERS/g);
     expect(matches).toHaveLength(1);
   });
@@ -1266,7 +1262,6 @@ describe("injectToolHardeningInstruction", () => {
     injectToolHardeningInstruction(payload, "CRITICAL TOOL USAGE INSTRUCTIONS: New");
     
     const instruction = payload.systemInstruction as any;
-    // Should not add another
     expect(instruction.parts).toHaveLength(1);
     expect(instruction.parts[0].text).toBe("CRITICAL TOOL USAGE INSTRUCTIONS: Already here");
   });
@@ -1290,13 +1285,8 @@ describe("injectToolHardeningInstruction", () => {
   });
 });
 
-// =============================================================================
-// PLACEHOLDER PARAMETER TESTS
-// =============================================================================
-
 describe("placeholder parameter for empty schemas", () => {
   it("uses _placeholder boolean instead of reason string", () => {
-    // This tests that injectParameterSignatures doesn't error on new placeholder format
     const tools = [
       {
         functionDeclarations: [
@@ -1316,8 +1306,163 @@ describe("placeholder parameter for empty schemas", () => {
     ];
 
     const result = injectParameterSignatures(tools);
-    // Should include the placeholder in the signature
     expect(result[0].functionDeclarations[0].description).toContain("STRICT PARAMETERS:");
     expect(result[0].functionDeclarations[0].description).toContain("_placeholder (boolean");
+  });
+});
+
+describe("cleanJSONSchemaForAntigravity", () => {
+  describe("enum merging from anyOf/oneOf", () => {
+    it("merges anyOf with const values into enum (WebFetch format pattern)", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          format: {
+            anyOf: [
+              { const: "text" },
+              { const: "markdown" },
+              { const: "html" },
+            ],
+          },
+        },
+      };
+
+      const result = cleanJSONSchemaForAntigravity(schema);
+
+      expect(result.properties.format.enum).toEqual(["text", "markdown", "html"]);
+      expect(result.properties.format.anyOf).toBeUndefined();
+      expect(result.properties.format.type).toBe("string");
+    });
+
+    it("merges oneOf with const values into enum", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          status: {
+            oneOf: [
+              { const: "pending" },
+              { const: "active" },
+              { const: "completed" },
+            ],
+          },
+        },
+      };
+
+      const result = cleanJSONSchemaForAntigravity(schema);
+
+      expect(result.properties.status.enum).toEqual(["pending", "active", "completed"]);
+      expect(result.properties.status.oneOf).toBeUndefined();
+    });
+
+    it("merges anyOf with single-value enums into combined enum", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          level: {
+            anyOf: [
+              { enum: ["low"] },
+              { enum: ["medium"] },
+              { enum: ["high"] },
+            ],
+          },
+        },
+      };
+
+      const result = cleanJSONSchemaForAntigravity(schema);
+
+      expect(result.properties.level.enum).toEqual(["low", "medium", "high"]);
+    });
+
+    it("merges anyOf with multi-value enums", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          color: {
+            anyOf: [
+              { enum: ["red", "blue"] },
+              { enum: ["green", "yellow"] },
+            ],
+          },
+        },
+      };
+
+      const result = cleanJSONSchemaForAntigravity(schema);
+
+      expect(result.properties.color.enum).toEqual(["red", "blue", "green", "yellow"]);
+    });
+
+    it("does not merge anyOf with complex types (not enum pattern)", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          data: {
+            anyOf: [
+              { type: "string" },
+              { type: "number" },
+            ],
+          },
+        },
+      };
+
+      const result = cleanJSONSchemaForAntigravity(schema);
+
+      expect(result.properties.data.enum).toBeUndefined();
+      expect(result.properties.data.type).toBe("string");
+    });
+
+    it("preserves parent description when merging enum", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          format: {
+            description: "Output format for the content",
+            anyOf: [
+              { const: "text" },
+              { const: "markdown" },
+            ],
+          },
+        },
+      };
+
+      const result = cleanJSONSchemaForAntigravity(schema);
+
+      expect(result.properties.format.enum).toEqual(["text", "markdown"]);
+      expect(result.properties.format.description).toContain("Output format");
+    });
+  });
+
+  it("adds enum hints to description", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        status: {
+          type: "string",
+          enum: ["active", "inactive", "pending"],
+        },
+      },
+    };
+
+    const result = cleanJSONSchemaForAntigravity(schema);
+
+    expect(result.properties.status.description).toContain("Allowed:");
+    expect(result.properties.status.description).toContain("active");
+    expect(result.properties.status.description).toContain("inactive");
+    expect(result.properties.status.description).toContain("pending");
+  });
+
+  it("preserves existing enum array", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        level: {
+          type: "string",
+          enum: ["low", "medium", "high"],
+        },
+      },
+    };
+
+    const result = cleanJSONSchemaForAntigravity(schema);
+
+    expect(result.properties.level.enum).toEqual(["low", "medium", "high"]);
   });
 });

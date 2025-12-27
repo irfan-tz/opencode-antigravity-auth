@@ -3,7 +3,7 @@ import { spawn } from "child_process";
 
 interface ModelTest {
   model: string;
-  category: "gemini-cli" | "antigravity-gemini" | "antigravity-claude" | "antigravity-gpt";
+  category: "gemini-cli" | "antigravity-gemini" | "antigravity-claude";
 }
 
 const MODELS: ModelTest[] = [
@@ -26,9 +26,6 @@ const MODELS: ModelTest[] = [
   { model: "google/antigravity-claude-opus-4-5-thinking-low", category: "antigravity-claude" },
   { model: "google/antigravity-claude-opus-4-5-thinking-medium", category: "antigravity-claude" },
   { model: "google/antigravity-claude-opus-4-5-thinking-high", category: "antigravity-claude" },
-
-  // Antigravity GPT
-  { model: "google/antigravity-gpt-oss-120b-medium", category: "antigravity-gpt" },
 ];
 
 const TEST_PROMPT = "Reply with exactly one word: WORKING";

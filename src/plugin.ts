@@ -190,10 +190,14 @@ async function persistAccountPool(
   const accounts = stored?.accounts ? [...stored.accounts] : [];
 
   const indexByRefreshToken = new Map<string, number>();
+  const indexByEmail = new Map<string, number>();
   for (let i = 0; i < accounts.length; i++) {
-    const token = accounts[i]?.refreshToken;
-    if (token) {
-      indexByRefreshToken.set(token, i);
+    const acc = accounts[i];
+    if (acc?.refreshToken) {
+      indexByRefreshToken.set(acc.refreshToken, i);
+    }
+    if (acc?.email) {
+      indexByEmail.set(acc.email, i);
     }
   }
 
@@ -203,9 +207,21 @@ async function persistAccountPool(
       continue;
     }
 
-    const existingIndex = indexByRefreshToken.get(parts.refreshToken);
+    // First, check for existing account by email (prevents duplicates when refresh token changes)
+    // Only use email-based deduplication if the new account has an email
+    const existingByEmail = result.email ? indexByEmail.get(result.email) : undefined;
+    const existingByToken = indexByRefreshToken.get(parts.refreshToken);
+    
+    // Prefer email-based match to handle refresh token rotation
+    const existingIndex = existingByEmail ?? existingByToken;
+    
     if (existingIndex === undefined) {
-      indexByRefreshToken.set(parts.refreshToken, accounts.length);
+      // New account - add it
+      const newIndex = accounts.length;
+      indexByRefreshToken.set(parts.refreshToken, newIndex);
+      if (result.email) {
+        indexByEmail.set(result.email, newIndex);
+      }
       accounts.push({
         email: result.email,
         refreshToken: parts.refreshToken,
@@ -222,13 +238,23 @@ async function persistAccountPool(
       continue;
     }
 
+    // Update existing account (this handles both email match and token match cases)
+    // When email matches but token differs, this effectively replaces the old token
+    const oldToken = existing.refreshToken;
     accounts[existingIndex] = {
       ...existing,
       email: result.email ?? existing.email,
+      refreshToken: parts.refreshToken,
       projectId: parts.projectId ?? existing.projectId,
       managedProjectId: parts.managedProjectId ?? existing.managedProjectId,
       lastUsed: now,
     };
+    
+    // Update the token index if the token changed
+    if (oldToken !== parts.refreshToken) {
+      indexByRefreshToken.delete(oldToken);
+      indexByRefreshToken.set(parts.refreshToken, existingIndex);
+    }
   }
 
   if (accounts.length === 0) {
@@ -1466,7 +1492,18 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 break;
               }
 
-              const addAnother = await promptAddAnotherAccount(accounts.length);
+              // Get the actual deduplicated account count from storage for the prompt
+              let currentAccountCount = accounts.length;
+              try {
+                const currentStorage = await loadAccounts();
+                if (currentStorage) {
+                  currentAccountCount = currentStorage.accounts.length;
+                }
+              } catch {
+                // Fall back to accounts.length if we can't read storage
+              }
+
+              const addAnother = await promptAddAnotherAccount(currentAccountCount);
               if (!addAnother) {
                 break;
               }
@@ -1482,9 +1519,20 @@ export const createAntigravityPlugin = (providerId: string) => async (
               };
             }
 
+            // Get the actual deduplicated account count from storage
+            let actualAccountCount = accounts.length;
+            try {
+              const finalStorage = await loadAccounts();
+              if (finalStorage) {
+                actualAccountCount = finalStorage.accounts.length;
+              }
+            } catch {
+              // Fall back to accounts.length if we can't read storage
+            }
+
             return {
               url: "",
-              instructions: `Multi-account setup complete (${accounts.length} account(s)).`,
+              instructions: `Multi-account setup complete (${actualAccountCount} account(s)).`,
               method: "auto",
               callback: async (): Promise<AntigravityTokenExchangeResult> => primary,
             };
