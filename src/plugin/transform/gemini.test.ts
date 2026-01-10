@@ -1,10 +1,12 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   isGeminiModel,
   isGemini3Model,
   isGemini25Model,
+  isImageGenerationModel,
   buildGemini3ThinkingConfig,
   buildGemini25ThinkingConfig,
+  buildImageGenerationConfig,
   normalizeGeminiTools,
   applyGeminiTransforms,
   toGeminiSchema,
@@ -486,6 +488,87 @@ describe("transform/gemini", () => {
       const thinkingConfig = genConfig.thinkingConfig as Record<string, unknown>;
       expect(thinkingConfig.includeThoughts).toBe(true);
       expect(thinkingConfig).not.toHaveProperty("thinkingBudget");
+    });
+  });
+
+  describe("isImageGenerationModel", () => {
+    it("returns true for gemini-3-pro-image", () => {
+      expect(isImageGenerationModel("gemini-3-pro-image")).toBe(true);
+    });
+
+    it("returns true for gemini-3-pro-image-preview", () => {
+      expect(isImageGenerationModel("gemini-3-pro-image-preview")).toBe(true);
+    });
+
+    it("returns true for gemini-2.5-flash-image", () => {
+      expect(isImageGenerationModel("gemini-2.5-flash-image")).toBe(true);
+    });
+
+    it("returns true for imagen-3", () => {
+      expect(isImageGenerationModel("imagen-3")).toBe(true);
+    });
+
+    it("returns true for uppercase GEMINI-3-PRO-IMAGE", () => {
+      expect(isImageGenerationModel("GEMINI-3-PRO-IMAGE")).toBe(true);
+    });
+
+    it("returns false for gemini-3-pro", () => {
+      expect(isImageGenerationModel("gemini-3-pro")).toBe(false);
+    });
+
+    it("returns false for gemini-2.5-flash", () => {
+      expect(isImageGenerationModel("gemini-2.5-flash")).toBe(false);
+    });
+
+    it("returns false for claude-sonnet-4-5", () => {
+      expect(isImageGenerationModel("claude-sonnet-4-5")).toBe(false);
+    });
+  });
+
+  describe("buildImageGenerationConfig", () => {
+    const originalEnv = process.env;
+
+    beforeEach(() => {
+      // Reset environment before each test
+      vi.resetModules();
+      process.env = { ...originalEnv };
+    });
+
+    afterEach(() => {
+      process.env = originalEnv;
+    });
+
+    it("returns default 1:1 aspect ratio when no env var set", () => {
+      delete process.env.OPENCODE_IMAGE_ASPECT_RATIO;
+      const config = buildImageGenerationConfig("gemini-3-pro-image");
+      expect(config).toEqual({ aspectRatio: "1:1" });
+    });
+
+    it("uses OPENCODE_IMAGE_ASPECT_RATIO env var when set to valid value", () => {
+      process.env.OPENCODE_IMAGE_ASPECT_RATIO = "16:9";
+      const config = buildImageGenerationConfig("gemini-3-pro-image");
+      expect(config).toEqual({ aspectRatio: "16:9" });
+    });
+
+    it("accepts all valid aspect ratios", () => {
+      const validRatios = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
+      for (const ratio of validRatios) {
+        process.env.OPENCODE_IMAGE_ASPECT_RATIO = ratio;
+        const config = buildImageGenerationConfig("gemini-3-pro-image");
+        expect(config.aspectRatio).toBe(ratio);
+      }
+    });
+
+    it("falls back to 1:1 for invalid aspect ratio", () => {
+      process.env.OPENCODE_IMAGE_ASPECT_RATIO = "invalid";
+      const config = buildImageGenerationConfig("gemini-3-pro-image");
+      expect(config).toEqual({ aspectRatio: "1:1" });
+    });
+
+    it("falls back to 1:1 for unsupported aspect ratio", () => {
+      process.env.OPENCODE_IMAGE_ASPECT_RATIO = "5:3";
+      const config = buildImageGenerationConfig("gemini-3-pro-image");
+      expect(config).toEqual({ aspectRatio: "1:1" });
     });
   });
 

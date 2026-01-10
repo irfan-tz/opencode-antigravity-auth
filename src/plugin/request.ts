@@ -54,7 +54,7 @@ import {
   needsThinkingRecovery,
 } from "./thinking-recovery";
 import { sanitizeCrossModelPayloadInPlace } from "./transform/cross-model-sanitizer";
-import { isGemini3Model } from "./transform";
+import { isGemini3Model, isImageGenerationModel, buildImageGenerationConfig } from "./transform";
 import {
   resolveModelWithTier,
   resolveModelWithVariant,
@@ -768,16 +768,52 @@ export function prepareAntigravityRequest(
         }
 
         // Resolve thinking configuration based on user settings and model capabilities
-        const userThinkingConfig = extractThinkingConfig(requestPayload, rawGenerationConfig, extraBody);
+        // Image generation models don't support thinking - skip thinking config entirely
+        const isImageModel = isImageGenerationModel(effectiveModel);
+        const userThinkingConfig = isImageModel ? undefined : extractThinkingConfig(requestPayload, rawGenerationConfig, extraBody);
         const hasAssistantHistory = Array.isArray(requestPayload.contents) &&
           requestPayload.contents.some((c: any) => c?.role === "model" || c?.role === "assistant");
 
         // For claude-sonnet-4-5 (without -thinking suffix), ignore client's thinkingConfig
         // Only claude-sonnet-4-5-thinking-* variants should have thinking enabled
         const isClaudeSonnetNonThinking = effectiveModel.toLowerCase() === "claude-sonnet-4-5";
-        const effectiveUserThinkingConfig = isClaudeSonnetNonThinking ? undefined : userThinkingConfig;
+        const effectiveUserThinkingConfig = (isClaudeSonnetNonThinking || isImageModel) ? undefined : userThinkingConfig;
 
-        const finalThinkingConfig = resolveThinkingConfig(
+        // For image models, add imageConfig instead of thinkingConfig
+        if (isImageModel) {
+          const imageConfig = buildImageGenerationConfig(effectiveModel);
+          const generationConfig = (rawGenerationConfig ?? {}) as Record<string, unknown>;
+          generationConfig.imageConfig = imageConfig;
+          // Remove any thinkingConfig that might have been set
+          delete generationConfig.thinkingConfig;
+          // Set reasonable defaults for image generation
+          if (!generationConfig.candidateCount) {
+            generationConfig.candidateCount = 1;
+          }
+          requestPayload.generationConfig = generationConfig;
+          
+          // Add safety settings for image generation (permissive to allow creative content)
+          if (!requestPayload.safetySettings) {
+            requestPayload.safetySettings = [
+              { category: "HARM_CATEGORY_HARASSMENT", threshold: "OFF" },
+              { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "OFF" },
+              { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "OFF" },
+              { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "OFF" },
+              { category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: "OFF" },
+            ];
+          }
+          
+          // Image models don't support tools - remove them entirely
+          delete requestPayload.tools;
+          delete requestPayload.toolConfig;
+          
+          // Replace system instruction with a simple image generation prompt
+          // Image models should not receive agentic coding assistant instructions
+          requestPayload.systemInstruction = {
+            parts: [{ text: "You are an AI image generator. Generate images based on user descriptions. Focus on creating high-quality, visually appealing images that match the user's request." }]
+          };
+        } else {
+          const finalThinkingConfig = resolveThinkingConfig(
           effectiveUserThinkingConfig,
           isClaudeSonnetNonThinking ? false : (resolved.isThinkingModel ?? isThinkingCapableModel(effectiveModel)),
           isClaude,
@@ -841,6 +877,7 @@ export function prepareAntigravityRequest(
           delete rawGenerationConfig.thinkingConfig;
           requestPayload.generationConfig = rawGenerationConfig;
         }
+        } // End of else block for non-image models
 
         // Clean up thinking fields from extra_body
         if (extraBody) {
