@@ -548,9 +548,7 @@ If you encounter error during the session, try chat `continue` the recover sessi
 When using Gemini CLI models, you may come across an error with the below text: 
 > Permission 'cloudaicompanion.companions.generateChat' denied on resource '//cloudaicompanion.googleapis.com/projects/rising-fact-p41fc/locations/global' (or it may not exist).
 
-When authenticating with Antigravity, the plugin attempts to provision or find a suitable Google Cloud project. If it doesn't find one, it will default to a predefined project ID set by the `ANTIGRAVITY_DEFAULT_PROJECT_ID` variable in this project.
-
-For Antigravity, this works fine. For Gemini CLI, it will throw an error because this project ID does not exist in your Google Cloud account.
+The plugin attempts to provision or find a suitable Google Cloud project when authenticating with Antigravity. If none is found, it defaults to a predefined project ID set by the `ANTIGRAVITY_DEFAULT_PROJECT_ID` variable in this project. While this works for Antigravity, Gemini CLI throws an error because this project ID does not exist in your Google Cloud account.
 
 For it to work, you can follow similar steps in [opencode-gemini-auth](https://github.com/jenslys/opencode-gemini-auth?tab=readme-ov-file#manual-google-cloud-setup):
 * Go to the [Google Cloud Console](https://console.cloud.google.com/).
