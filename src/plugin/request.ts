@@ -403,6 +403,11 @@ function isGeminiThinkingPart(part: any): boolean {
   );
 }
 
+// Sentinel value used when signature recovery fails - allows Claude to handle gracefully
+// by redacting the thinking block instead of rejecting the request entirely.
+// Reference: LLM-API-Key-Proxy uses this pattern for Gemini 3 tool calls.
+const SENTINEL_SIGNATURE = "skip_thought_signature_validator";
+
 function ensureThoughtSignature(part: any, sessionId: string): any {
   if (!part || typeof part !== "object") {
     return part;
@@ -419,6 +424,9 @@ function ensureThoughtSignature(part: any, sessionId: string): any {
       if (cached) {
         return { ...part, thoughtSignature: cached };
       }
+      // Fallback: use sentinel signature to prevent API rejection
+      // This allows Claude to redact the thinking block instead of failing
+      return { ...part, thoughtSignature: SENTINEL_SIGNATURE };
     }
     return part;
   }
@@ -428,6 +436,8 @@ function ensureThoughtSignature(part: any, sessionId: string): any {
     if (cached) {
       return { ...part, signature: cached };
     }
+    // Fallback: use sentinel signature to prevent API rejection
+    return { ...part, signature: SENTINEL_SIGNATURE };
   }
 
   return part;
