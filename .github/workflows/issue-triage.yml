@@ -186,7 +186,7 @@ jobs:
             -d "{
               \"prompt\": $ESCAPED_PROMPT,
               \"sourceContext\": {
-                \"source\": \"sources/github-${{ github.repository_owner }}-${{ github.event.repository.name }}\",
+                \"source\": \"sources/github/${{ github.repository }}\",
                 \"githubRepoContext\": {
                   \"startingBranch\": \"main\"
                 }
@@ -258,7 +258,7 @@ jobs:
           PROMPT=$(cat triage_prompt.txt)
           ESCAPED_PROMPT=$(echo "$PROMPT" | jq -Rs .)
           
-          RESPONSE=$(curl -s "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash:generateContent?key=$GEMINI_API_KEY" \
+          RESPONSE=$(curl -s "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=$GEMINI_API_KEY" \
             -H "Content-Type: application/json" \
             -d "{
               \"contents\": [{
