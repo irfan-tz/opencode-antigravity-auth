@@ -142,7 +142,7 @@ jobs:
               return;
             }
             
-            const labelsToAdd = [];
+            let labelsToAdd = [];
             const labelsToRemove = ['needs-triage'];
             
             // Remove existing triage labels to prevent conflicts
