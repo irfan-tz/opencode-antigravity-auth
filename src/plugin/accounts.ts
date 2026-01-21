@@ -377,7 +377,7 @@ export class AccountManager {
       if (selectedIndex !== null) {
         const selected = this.accounts[selectedIndex];
         if (selected) {
-          selected.lastUsed = nowMs();
+          // Note: lastUsed is now updated after successful request via markAccountUsed()
           this.markTouchedForQuota(selected, quotaKey);
           this.currentAccountIndexByFamily[family] = selected.index;
           return selected;
@@ -400,7 +400,7 @@ export class AccountManager {
       clearExpiredRateLimits(current);
       const isLimitedForRequestedStyle = isRateLimitedForHeaderStyle(current, family, headerStyle, model);
       if (!isLimitedForRequestedStyle && !this.isAccountCoolingDown(current)) {
-        current.lastUsed = nowMs();
+        // Note: lastUsed is now updated after successful request via markAccountUsed()
         this.markTouchedForQuota(current, quotaKey);
         return current;
       }
@@ -430,7 +430,7 @@ export class AccountManager {
     }
 
     this.cursor++;
-    account.lastUsed = nowMs();
+    // Note: lastUsed is now updated after successful request via markAccountUsed()
     return account;
   }
 
@@ -443,6 +443,18 @@ export class AccountManager {
   ): void {
     const key = getQuotaKey(family, headerStyle, model);
     account.rateLimitResetTimes[key] = nowMs() + retryAfterMs;
+  }
+
+  /**
+   * Mark an account as used after a successful API request.
+   * This updates the lastUsed timestamp for freshness calculations.
+   * Should be called AFTER request completion, not during account selection.
+   */
+  markAccountUsed(accountIndex: number): void {
+    const account = this.accounts.find(a => a.index === accountIndex);
+    if (account) {
+      account.lastUsed = nowMs();
+    }
   }
 
   markRateLimitedWithReason(

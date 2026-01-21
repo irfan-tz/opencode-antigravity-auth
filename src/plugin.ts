@@ -1441,6 +1441,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 if (response.ok) {
                   account.consecutiveFailures = 0;
                   getHealthTracker().recordSuccess(account.index);
+                  accountManager.markAccountUsed(account.index);
                 }
                 logAntigravityDebugResponse(debugContext, response, {
                   note: response.ok ? "Success" : `Error ${response.status}`,
