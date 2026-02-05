@@ -3,7 +3,7 @@ import { tool } from "@opencode-ai/plugin";
 import { ANTIGRAVITY_ENDPOINT_FALLBACKS, ANTIGRAVITY_PROVIDER_ID, type HeaderStyle } from "./constants";
 import { authorizeAntigravity, exchangeAntigravity } from "./antigravity/oauth";
 import type { AntigravityTokenExchangeResult } from "./antigravity/oauth";
-import { accessTokenExpired, isOAuthAuth, parseRefreshParts } from "./plugin/auth";
+import { accessTokenExpired, isOAuthAuth, parseRefreshParts, formatRefreshParts } from "./plugin/auth";
 import { promptAddAnotherAccount, promptLoginMode, promptProjectId } from "./plugin/cli";
 import { ensureProjectContext } from "./plugin/project";
 import {
@@ -389,6 +389,28 @@ async function persistAccountPool(
       gemini: clampInt(activeIndex, 0, accounts.length - 1),
     },
   });
+}
+
+function buildAuthSuccessFromStoredAccount(account: {
+  refreshToken: string;
+  projectId?: string;
+  managedProjectId?: string;
+  email?: string;
+}): Extract<AntigravityTokenExchangeResult, { type: "success" }> {
+  const refresh = formatRefreshParts({
+    refreshToken: account.refreshToken,
+    projectId: account.projectId,
+    managedProjectId: account.managedProjectId,
+  });
+
+  return {
+    type: "success",
+    refresh,
+    access: "",
+    expires: 0,
+    email: account.email,
+    projectId: account.projectId ?? "",
+  };
 }
 
 function retryAfterMsFromResponse(response: Response, defaultRetryMs: number = 60_000): number {
@@ -1975,15 +1997,51 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   activeIndexByFamily: { claude: 0, gemini: 0 },
                 });
                 console.log("\nAccount deleted.\n");
-                
+
                 if (updatedAccounts.length > 0) {
-                  return {
-                    url: "",
-                    instructions: "Account deleted. Please run `opencode auth login` again to continue.",
-                    method: "auto",
-                    callback: async () => ({ type: "failed", error: "Account deleted - please re-run auth" }),
-                  };
+                  const fallbackAccount = updatedAccounts[0];
+                  if (fallbackAccount?.refreshToken) {
+                    const fallbackResult = buildAuthSuccessFromStoredAccount(fallbackAccount);
+                    try {
+                      await client.auth.set({
+                        path: { id: providerId },
+                        body: { type: "oauth", refresh: fallbackResult.refresh, access: "", expires: 0 },
+                      });
+                    } catch (storeError) {
+                      log.error("Failed to update stored Antigravity OAuth credentials", { error: String(storeError) });
+                    }
+
+                    const label = fallbackAccount.email || `Account ${1}`;
+                    return {
+                      url: "",
+                      instructions: `Account deleted. Using ${label} for future requests.`,
+                      method: "auto",
+                      callback: async () => fallbackResult,
+                    };
+                  }
                 }
+
+                try {
+                  await client.auth.set({
+                    path: { id: providerId },
+                    body: { type: "oauth", refresh: "", access: "", expires: 0 },
+                  });
+                } catch (storeError) {
+                  log.error("Failed to clear stored Antigravity OAuth credentials", { error: String(storeError) });
+                }
+
+                return {
+                  url: "",
+                  instructions: "All accounts deleted. Run `opencode auth login` to reauthenticate.",
+                  method: "auto",
+                  callback: async () => ({
+                    type: "success",
+                    refresh: "",
+                    access: "",
+                    expires: 0,
+                    projectId: "",
+                  }),
+                };
               }
 
               if (menuResult.refreshAccountIndex !== undefined) {
@@ -1997,6 +2055,14 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 await clearAccounts();
                 console.log("\nAll accounts deleted.\n");
                 startFresh = true;
+                try {
+                  await client.auth.set({
+                    path: { id: providerId },
+                    body: { type: "oauth", refresh: "", access: "", expires: 0 },
+                  });
+                } catch (storeError) {
+                  log.error("Failed to clear stored Antigravity OAuth credentials", { error: String(storeError) });
+                }
               } else {
                 startFresh = menuResult.mode === "fresh";
               }
