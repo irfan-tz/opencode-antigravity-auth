@@ -129,7 +129,8 @@
     },
     "quota_fallback": {
       "default": false,
-      "type": "boolean"
+      "type": "boolean",
+      "description": "Deprecated: accepted for backward compatibility but ignored at runtime. Gemini fallback between Antigravity and Gemini CLI is always enabled."
     },
     "cli_first": {
       "default": false,

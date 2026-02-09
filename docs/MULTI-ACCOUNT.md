@@ -27,7 +27,7 @@ For Gemini models, the plugin accesses **two independent quota pools** per accou
 | **Antigravity** | Default for all requests |
 | **Gemini CLI** | Automatic fallback when Antigravity exhausted on ALL accounts |
 
-This effectively **doubles your Gemini quota** when you have `quota_fallback` enabled.
+This effectively **doubles your Gemini quota** through automatic fallback between Antigravity and Gemini CLI pools.
 
 ### How Quota Fallback Works
 
@@ -37,13 +37,7 @@ This effectively **doubles your Gemini quota** when you have `quota_fallback` en
 4. If no (all accounts exhausted) → fall back to Gemini CLI quota on current account
 5. Model names are automatically transformed (e.g., `gemini-3-flash` → `gemini-3-flash-preview`)
 
-To enable automatic fallback between pools, set in `antigravity.json`:
-
-```json
-{
-  "quota_fallback": true
-}
-```
+Automatic fallback between pools is always enabled for Gemini requests.
 
 ---
 
