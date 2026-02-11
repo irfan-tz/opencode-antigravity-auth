@@ -776,7 +776,8 @@ export function prepareAntigravityRequest(
         const extraBody = requestPayload.extra_body as Record<string, unknown> | undefined;
 
         const variantConfig = extractVariantThinkingConfig(
-          requestPayload.providerOptions as Record<string, unknown> | undefined
+          requestPayload.providerOptions as Record<string, unknown> | undefined,
+          rawGenerationConfig
         );
         const isGemini3 = effectiveModel.toLowerCase().includes("gemini-3");
 
