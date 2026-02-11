@@ -2975,11 +2975,8 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   instructions: "All accounts deleted. Run `opencode auth login` to reauthenticate.",
                   method: "auto",
                   callback: async () => ({
-                    type: "success",
-                    refresh: "",
-                    access: "",
-                    expires: 0,
-                    projectId: "",
+                    type: "failed",
+                    error: "All accounts deleted. Reauthentication required.",
                   }),
                 };
               }
